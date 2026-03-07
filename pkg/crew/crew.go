@@ -3,11 +3,15 @@ package crew
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/Ecook14/crewai-go/pkg/agents"
 	"github.com/Ecook14/crewai-go/pkg/tasks"
 )
+
+var defaultLogger = slog.Default()
 
 // Process mode for execution. Translates from `Process(Enum)` in Python.
 type ProcessType string

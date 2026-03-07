@@ -28,7 +28,7 @@ go get github.com/Ecook14/crewai-go
 2. **(Optional) Install the CLI Tool for boilerplate scaffolding**:
 
 ```bash
-go install github.com/Ecook14/crewai-go/cmd/crew-go@latest
+go install github.com/Ecook14/crewai-go/cmd/crewai@latest
 ```
 
 ## Quickstart
@@ -81,6 +81,12 @@ You can run the built-in examples straight from the terminal. The `researcher_ap
 cd Crew-GO
 OPENAI_API_KEY="your-sk-key" go run examples/advanced_app/main.go
 ```
+
+If you installed the CLI, you can generate a new project anywhere:
+```shell
+crewai create my_ai_project
+```
+*(Or run it locally from the source repository via `go run cmd/crewai/main.go create my_ai_project`)*
 
 ## Acknowledgements & Thanks 🙏
 

@@ -15,8 +15,8 @@ go get github.com/Ecook14/crewai-go
 *(Optional)* If you want to automatically scaffold a standard project layout (`/src`, `/config/agents.yaml`), install the CLI mapping tool:
 
 ```bash
-go install github.com/Ecook14/crewai-go/cmd/crew-go@latest
-crew-go create my_ai_project
+go install github.com/Ecook14/crewai-go/cmd/crewai@latest
+crewai create my_ai_project
 ```
 
 ## 2. Setting Up an Agent

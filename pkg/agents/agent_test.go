@@ -17,6 +17,10 @@ func (m *mockLLM) GenerateStructured(ctx context.Context, messages []llm.Message
 	return nil, nil
 }
 
+func (m *mockLLM) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	return []float32{0.1, 0.2, 0.3}, nil
+}
+
 func TestAgentExecuteWithoutLLM(t *testing.T) {
 	agent := Agent{
 		Role:      "Tester",

@@ -71,7 +71,7 @@ You have access to the following tools:
 %s
 
 To use a tool, you MUST reply with a pure JSON object in this exact format:
-{"tool": "ToolName", "input": "input payload string"}
+{"tool": "ToolName", "input": {"parameter_name": "parameter_value"}}
 
 Once you have gathered all necessary information and are ready to provide the final answer, do NOT return a tool JSON. Simply output your final answer text natively.`, a.Role, a.Backstory, a.Goal, toolDescriptions)
 
@@ -126,8 +126,8 @@ Once you have gathered all necessary information and are ready to provide the fi
 
 		// ReAct Tool Parsing Logics (Looking for the {"tool": ...} block)
 		var toolReq struct {
-			Tool  string `json:"tool"`
-			Input string `json:"input"`
+			Tool  string                 `json:"tool"`
+			Input map[string]interface{} `json:"input"`
 		}
 
 		// Fast-fail JSON parse check to see if the LLM wants a tool or is giving the final answer
@@ -142,7 +142,7 @@ Once you have gathered all necessary information and are ready to provide the fi
 
 			if activeTool != nil {
 				if a.Verbose {
-					defaultLogger.Info("🔨 Agent Tool Triggered", slog.String("agent", a.Role), slog.String("tool", toolReq.Tool), slog.String("input", toolReq.Input))
+					defaultLogger.Info("🔨 Agent Tool Triggered", slog.String("agent", a.Role), slog.String("tool", toolReq.Tool), slog.Any("input", toolReq.Input))
 				}
 
 				if a.StepCallback != nil {
@@ -150,7 +150,7 @@ Once you have gathered all necessary information and are ready to provide the fi
 				}
 
 				// Execute the physically bound Go interface Tool
-				toolResult, toolErr := activeTool.Run(toolReq.Input)
+				toolResult, toolErr := activeTool.Execute(ctx, toolReq.Input)
 				
 				var observation string
 				if toolErr != nil {

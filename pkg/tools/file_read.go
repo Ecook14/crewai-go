@@ -41,3 +41,5 @@ func (t *FileReadTool) Execute(ctx context.Context, input map[string]interface{}
 
 	return string(data), nil
 }
+
+func (t *FileReadTool) RequiresReview() bool { return false }

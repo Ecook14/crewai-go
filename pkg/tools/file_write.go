@@ -48,3 +48,5 @@ func (t *FileWriteTool) Execute(ctx context.Context, input map[string]interface{
 
 	return fmt.Sprintf("Successfully wrote to %s", path), nil
 }
+
+func (t *FileWriteTool) RequiresReview() bool { return false }

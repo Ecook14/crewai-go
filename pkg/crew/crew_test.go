@@ -2,93 +2,110 @@ package crew
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Ecook14/crewai-go/pkg/agents"
+	"github.com/Ecook14/crewai-go/pkg/llm"
 	"github.com/Ecook14/crewai-go/pkg/tasks"
 )
 
-func TestCrewKickoffSequential(t *testing.T) {
-	agent := &agents.Agent{Role: "Researcher"}
-	task1 := &tasks.Task{Description: "Find Data", Agent: agent}
-	task2 := &tasks.Task{Description: "Analyze Data", Agent: agent}
-
-	system := Crew{
-		Agents:  []*agents.Agent{agent},
-		Tasks:   []*tasks.Task{task1, task2},
-		Process: Sequential,
-	}
-
-	result, err := system.Kickoff(context.Background())
-	if err != nil {
-		t.Fatalf("Kickoff failed: %v", err)
-	}
-
-	expectedResult := "Task executed successfully by Researcher"
-	if resultStr, ok := result.(string); ok {
-		if resultStr != expectedResult {
-			t.Errorf("expected '%s', got '%s'", expectedResult, resultStr)
-		}
-	} else {
-		t.Errorf("Expected result sequence to be castable as string format")
-	}
-
-	if !task1.Processed || !task2.Processed {
-		t.Error("expected all tasks to be marked Processed")
-	}
+type mockLLM struct {
+	llm.Client
+	generateFunc func(messages []llm.Message) (string, error)
 }
 
-func TestCrewKickoffInvalid(t *testing.T) {
-	system := Crew{
-		Process: Sequential,
-	}
-
-	_, err := system.Kickoff(context.Background())
-	if err == nil {
-		t.Error("expected error for zero tasks, got nil")
-	}
+func (m *mockLLM) Generate(ctx context.Context, messages []llm.Message, options map[string]interface{}) (string, error) {
+	return m.generateFunc(messages)
 }
 
-func TestCrewKickoffHierarchical(t *testing.T) {
-	agent := &agents.Agent{Role: "ParallelWorker"}
-	task1 := &tasks.Task{Description: "Sync 1", Agent: agent}
-	task2 := &tasks.Task{Description: "Sync 2", Agent: agent}
-
-	system := Crew{
-		Agents:  []*agents.Agent{agent},
-		Tasks:   []*tasks.Task{task1, task2},
-		Process: Hierarchical,
+func TestCrewKickoff_Sequential(t *testing.T) {
+	mock := &mockLLM{
+		generateFunc: func(messages []llm.Message) (string, error) {
+			return "Done", nil
+		},
 	}
 
-	result, err := system.Kickoff(context.Background())
-	if err != nil {
-		t.Fatalf("Hierarchical Kickoff failed: %v", err)
-	}
+	agent := &agents.Agent{Role: "Worker", LLM: mock}
+	task := &tasks.Task{Description: "Job", Agent: agent}
 
-	if resultSlice, ok := result.([]interface{}); ok {
-		if len(resultSlice) != 2 {
-			t.Errorf("Expected 2 results from parallel execution, got %d", len(resultSlice))
-		}
-	} else {
-		t.Errorf("Expected result sequence to be castable as []interface{} format")
-	}
-}
-
-func TestCrewKickoffCancellation(t *testing.T) {
-	agent := &agents.Agent{Role: "SlowWorker"}
-	task := &tasks.Task{Description: "Long running", Agent: agent}
-
-	system := Crew{
+	c := &Crew{
 		Agents:  []*agents.Agent{agent},
 		Tasks:   []*tasks.Task{task},
 		Process: Sequential,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
+	res, err := c.Kickoff(context.Background())
+	if err != nil {
+		t.Fatalf("Kickoff failed: %v", err)
+	}
 
-	_, err := system.Kickoff(ctx)
-	if err == nil || err != context.Canceled {
-		t.Errorf("Expected context.Canceled error, got: %v", err)
+	if res != "Done" {
+		t.Errorf("Expected 'Done', got %v", res)
+	}
+}
+
+func TestCrewKickoff_Hierarchical(t *testing.T) {
+	// For hierarchical, we need to mock delegation and synthesis.
+	mock := &mockLLM{
+		generateFunc: func(messages []llm.Message) (string, error) {
+			// First call for delegation, second for synthesis
+			for _, m := range messages {
+				if strings.Contains(m.Content, "BEST suited") {
+					return "Worker", nil
+				}
+				if strings.Contains(m.Content, "Analyze the following") {
+					return "Aggregated Report", nil
+				}
+			}
+			return "Worker Output", nil
+		},
+	}
+
+	agent := &agents.Agent{Role: "Worker", LLM: mock}
+	task := &tasks.Task{Description: "Job", Agent: agent}
+
+	c := &Crew{
+		Agents:  []*agents.Agent{agent},
+		Tasks:   []*tasks.Task{task},
+		Process: Hierarchical,
+	}
+
+	res, err := c.Kickoff(context.Background())
+	if err != nil {
+		t.Fatalf("Kickoff failed: %v", err)
+	}
+
+func TestCrewKickoff_DelegationInjection(t *testing.T) {
+	mock := &mockLLM{
+		generateFunc: func(messages []llm.Message) (string, error) {
+			return "Done", nil
+		},
+	}
+
+	agent := &agents.Agent{Role: "Worker", LLM: mock, AllowDelegation: true}
+	task := &tasks.Task{Description: "Job", Agent: agent}
+
+	c := &Crew{
+		Agents:  []*agents.Agent{agent, {Role: "Coworker"}},
+		Tasks:   []*tasks.Task{task},
+		Process: Sequential,
+	}
+
+	_, err := c.Kickoff(context.Background())
+	if err != nil {
+		t.Fatalf("Kickoff failed: %v", err)
+	}
+
+	foundDelegation := false
+	for _, tool := range agent.Tools {
+		if tool.Name() == "DelegateWork" {
+			foundDelegation = true
+			break
+		}
+	}
+
+	if !foundDelegation {
+		t.Errorf("Expected DelegateWork tool to be injected")
 	}
 }

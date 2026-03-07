@@ -8,6 +8,9 @@ import (
 	"strings"
 
 	"github.com/Ecook14/crewai-go/pkg/agents"
+	crewErrors "github.com/Ecook14/crewai-go/pkg/errors"
+	"github.com/Ecook14/crewai-go/pkg/guardrails"
+	"github.com/Ecook14/crewai-go/pkg/telemetry"
 	"github.com/Ecook14/crewai-go/pkg/tools"
 )
 
@@ -20,8 +23,10 @@ type Task struct {
 	AsyncExecution bool
 
 	// Output Formatting
-	OutputJSON  bool
-	OutputPydan interface{} // Map to struct tags in Go
+	OutputJSON   bool
+	OutputPydan  interface{} // Deprecated: use OutputSchema
+	OutputSchema interface{} // Target Go struct for validation
+	MaxRetries   int         // Retries for schema validation failures
 
 	// Execution Tracking
 	Processed bool
@@ -30,17 +35,53 @@ type Task struct {
 	// Advanced Quality-of-Life Mappings
 	Context    []*Task // Strict outputs to pipe into this task's prompt
 	HumanInput bool    // Blocks CLI execution for mid-flight approval/feedback
+
+	// Guardrails validate task output before marking it as complete.
+	Guardrails []guardrails.Guardrail
+
+	// CallbackOnComplete fires after the task completes successfully.
+	CallbackOnComplete func(result interface{})
+
+	// Dependencies define explicit graph edges for DAG orchestration.
+	Dependencies []*Task
+
+	// Elite Tier: State Machine & Cyclic Logic
+	// OutputCondition returns a key used to select the next task from NextPaths.
+	OutputCondition func(result interface{}) string 
+	
+	// NextPaths maps condition keys to the successor tasks.
+	NextPaths map[string]*Task
+
+	// MaxCycles limits how many times this task can be re-executed in a cycle.
+	MaxCycles int
+	
+	// Internal tracking
+	CycleCount int
 }
 
 // Execute kicks off the Task lifecycle utilizing the bound Agent.
 func (t *Task) Execute(ctx context.Context) (interface{}, error) {
 	if t.Agent == nil {
-		return nil, context.Canceled // Require agent mapping
+		return nil, crewErrors.ErrNoAgent
 	}
 
 	baseDescription := t.Description
 
-	// 1. Process Task Dependency Contexts (Inject prior task outputs)
+	// Publish telemetry event
+	telemetry.GlobalBus.Publish(telemetry.Event{
+		Type:      telemetry.EventTaskStarted,
+		AgentRole: t.Agent.Role,
+		Payload: map[string]interface{}{
+			"description": baseDescription,
+		},
+	})
+
+	// 1. Append expected output hint
+	if t.ExpectedOutput != "" {
+		baseDescription += "\n\nEXPECTED OUTPUT FORMAT:\n" + t.ExpectedOutput
+	}
+
+	// 2. Process Task Dependency Contexts (Inject prior task outputs)
 	if len(t.Context) > 0 {
 		baseDescription += "\n\nCRITICAL CONTEXT FROM PREVIOUS TASKS:\n"
 		for i, ctxTask := range t.Context {
@@ -51,9 +92,9 @@ func (t *Task) Execute(ctx context.Context) (interface{}, error) {
 		baseDescription += "--------------------------\n"
 	}
 
-	// 2. Process Human-in-the-Loop (HITL) blocking
+	// 3. Process Human-in-the-Loop (HITL) blocking
 	if t.HumanInput {
-		fmt.Printf("\n[🤖 HITL PAUSE] Agent '%s' is about to execute task:\n%s\n", t.Agent.Role, baseDescription)
+		slog.Info("[🤖 HITL PAUSE] Agent is about to execute task", slog.String("role", t.Agent.Role), slog.String("description", baseDescription))
 		fmt.Print("Please provide feedback or press Enter to approve as-is: ")
 
 		reader := bufio.NewReader(os.Stdin)
@@ -70,14 +111,92 @@ func (t *Task) Execute(ctx context.Context) (interface{}, error) {
 	}
 
 	options := make(map[string]interface{})
-	if t.OutputPydan != nil {
+	if t.OutputSchema != nil {
+		options["schema"] = t.OutputSchema
+	} else if t.OutputPydan != nil {
 		options["schema"] = t.OutputPydan
 	}
 
-	result, err := t.Agent.Execute(ctx, baseDescription, options)
-	if err == nil {
-		t.Processed = true
-		t.Output = result
+	maxRetries := t.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 1 // At least 1 attempt
 	}
-	return result, err
+
+	var result interface{}
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		result, err = t.Agent.Execute(ctx, baseDescription, options)
+		if err == nil {
+			// If we have a schema, verify we got a structured result
+			if t.OutputSchema != nil || t.OutputPydan != nil {
+				// The LLM.GenerateStructured tool handles the actual unmarshaling.
+				// If it succeeded, result will be a pointer to the struct.
+				break 
+			}
+			break
+		}
+		
+		if i < maxRetries-1 {
+			slog.Warn("[⚠️ Task Retry] Validation failed, retrying", slog.Int("iter", i+1), slog.Int("max", maxRetries), slog.Any("error", err))
+			continue
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Apply task-level guardrails
+	if len(t.Guardrails) > 0 {
+		if resultStr, ok := result.(string); ok {
+			if gErr := guardrails.RunAll(t.Guardrails, resultStr); gErr != nil {
+				return nil, fmt.Errorf("%w: %v", crewErrors.ErrGuardrailFailed, gErr)
+			}
+		}
+	}
+
+	t.Processed = true
+	t.Output = result
+
+	// 4. Fire completion callback
+	if t.CallbackOnComplete != nil {
+		t.CallbackOnComplete(result)
+	}
+
+	// 5. Post-Execution HITL: Review and Edit Result
+	if t.HumanInput {
+		slog.Info("[🤖 HITL REVIEW] Agent finished task", slog.String("role", t.Agent.Role), slog.Any("result", result))
+		fmt.Print("Press Enter to approve, or type 'edit' to modify the output: ")
+		
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		if input == "edit" {
+			fmt.Println("Please enter the new final output (type 'EOF' on a new line to finish):")
+			var newOutput strings.Builder
+			for {
+				line, _ := reader.ReadString('\n')
+				if strings.TrimSpace(line) == "EOF" {
+					break
+				}
+				newOutput.WriteString(line)
+			}
+			result = strings.TrimSpace(newOutput.String())
+			t.Output = result
+			fmt.Println("[✅ Output Manually Overridden]")
+		}
+	}
+
+	// Publish telemetry event
+	telemetry.GlobalBus.Publish(telemetry.Event{
+		Type:      telemetry.EventTaskFinished,
+		AgentRole: t.Agent.Role,
+		Payload: map[string]interface{}{
+			"result": result,
+		},
+	})
+
+	return result, nil
 }

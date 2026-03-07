@@ -42,3 +42,14 @@ func (c *AnthropicClient) GenerateStructured(ctx context.Context, messages []Mes
 func (c *AnthropicClient) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
 	return nil, fmt.Errorf("anthropic direct embeddings natively omitted; route to Voyage AI or OpenAI instead")
 }
+// StreamGenerate handles real-time token output (Stubbed).
+func (c *AnthropicClient) StreamGenerate(ctx context.Context, messages []Message, options map[string]interface{}) (<-chan string, error) {
+	ch := make(chan string)
+	go func() {
+		defer close(ch)
+		ch <- "Anthropic Stream Mock token 1... "
+		ch <- "token 2... "
+		ch <- "done."
+	}()
+	return ch, nil
+}

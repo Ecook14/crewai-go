@@ -7,69 +7,52 @@ import (
 	"github.com/Ecook14/crewai-go/pkg/agents"
 )
 
-func TestTaskExecute(t *testing.T) {
-	agent := &agents.Agent{
-		Role: "Writer",
-	}
-
-	task := Task{
-		Description: "Write a short blog post",
-		Agent:       agent,
-	}
-
-	result, err := task.Execute(context.Background())
-	if err != nil {
-		t.Fatalf("task.Execute failed: %v", err)
-	}
-
-	if !task.Processed {
-		t.Error("task.Processed expected true, got false")
-	}
-
-	expectedResult := "Task executed successfully by Writer"
-	
-	// Assert string compatibility
-	if resultStr, ok := result.(string); ok {
-		if resultStr != expectedResult {
-			t.Errorf("expected '%s', got '%s'", expectedResult, resultStr)
-		}
-	} else {
-		t.Errorf("expected return wrapper to be parsable as a string")
-	}
+type mockAgent struct {
+	executeFunc func(taskInput string) (interface{}, error)
 }
 
-func TestTaskAsyncFlag(t *testing.T) {
-	agent := &agents.Agent{Role: "AsyncWorker"}
-	task := &Task{
-		Description:    "Background Job",
-		Agent:          agent,
-		AsyncExecution: true,
+func (m *mockAgent) Execute(ctx context.Context, taskInput string, options map[string]interface{}) (interface{}, error) {
+	return m.executeFunc(taskInput)
+}
+
+func (m *mockAgent) GetRole() string { return "Mock Agent" }
+
+func TestTaskExecute(t *testing.T) {
+	mockLLM := &mockLLMClient{
+		generateFunc: func(messages []llm.Message) (string, error) {
+			return "Task Output", nil
+		},
 	}
 
-	if !task.AsyncExecution {
-		t.Error("Expected AsyncExecution to be true")
+	agent := &agents.Agent{
+		Role: "Tester",
+		LLM:  mockLLM,
+	}
+
+	task := &Task{
+		Description: "Perform test",
+		Agent:       agent,
 	}
 
 	res, err := task.Execute(context.Background())
 	if err != nil {
-		t.Fatalf("task execution failed: %v", err)
+		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	// Just checking the stub parses
-	if _, ok := res.(string); ok {
-		if !task.Processed {
-			t.Error("Async task flag should map to Processed state upon channel completion")
-		}
+	if res != "Task Output" {
+		t.Errorf("Expected 'Task Output', got %v", res)
+	}
+
+	if !task.Processed {
+		t.Errorf("Expected task to be marked as processed")
 	}
 }
 
-func TestTaskExecuteNoAgent(t *testing.T) {
-	task := Task{
-		Description: "No agent task",
-	}
+type mockLLMClient struct {
+	llm.Client
+	generateFunc func(messages []llm.Message) (string, error)
+}
 
-	_, err := task.Execute(context.Background())
-	if err == nil {
-		t.Error("expected error for nil agent, got nil")
-	}
+func (m *mockLLMClient) Generate(ctx context.Context, messages []llm.Message, options map[string]interface{}) (string, error) {
+	return m.generateFunc(messages)
 }

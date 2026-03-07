@@ -3,12 +3,17 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 // AskQuestionTool is a built-in tool that allows agents to ask questions to each other
 // or explicitly solicit user feedback if configured.
 type AskQuestionTool struct {
 	Verbose bool
+}
+
+type FeedbackProvider interface {
+	Ask(question string) (string, error)
 }
 
 func NewAskQuestionTool() *AskQuestionTool {
@@ -30,10 +35,16 @@ func (t *AskQuestionTool) Execute(ctx context.Context, input map[string]interfac
 	}
 
 	if t.Verbose {
-		fmt.Printf("Tool [Ask Question]: Executing with question: %s\n", question)
+		slog.Info("Tool [Ask Question]: Executing with question", slog.String("question", question))
 	}
 
-	// In a complete implementation, this would route back through the Crew orchestrator
-	// via a shared context or channel to query a target agent.
-	return "Received response to: " + question, nil
+	// Advanced Level: Try to get a feedback provider from context
+	if provider, ok := ctx.Value("feedback_provider").(FeedbackProvider); ok {
+		return provider.Ask(question)
+	}
+
+	// Default fallback for the demo
+	return "No feedback provider configured. Received response to: " + question, nil
 }
+
+func (t *AskQuestionTool) RequiresReview() bool { return false }

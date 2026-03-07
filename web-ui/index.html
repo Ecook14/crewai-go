@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crew-GO | Real-time Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0a0a0c;
+            --accent-color: #6366f1;
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --status-thinking: #f59e0b;
+            --status-working: #10b981;
+            --status-idle: #64748b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            background-image: 
+                radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.05) 0%, transparent 40%);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--glass-border);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -0.05em;
+            background: linear-gradient(to right, #6366f1, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-badge {
+            padding: 0.5rem 1rem;
+            border-radius: 99px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--status-idle);
+            box-shadow: 0 0 10px var(--status-idle);
+        }
+
+        .status-dot.active {
+            background: var(--status-working);
+            box-shadow: 0 0 10px var(--status-working);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 1rem;
+            backdrop-filter: blur(10px);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .agent-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .agent-item {
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--glass-border);
+            border-radius: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.3s ease;
+        }
+
+        .agent-info h4 {
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .agent-info p {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .terminal-container {
+            display: flex;
+            flex-direction: column;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 1rem;
+            overflow: hidden;
+        }
+
+        .terminal-header {
+            padding: 0.75rem 1rem;
+            background: rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid var(--glass-border);
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .terminal-content {
+            flex: 1;
+            padding: 1rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            overflow-y: auto;
+            line-height: 1.6;
+            color: #d1d5db;
+        }
+
+        .log-entry {
+            margin-bottom: 0.75rem;
+            border-left: 2px solid transparent;
+            padding-left: 1rem;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .log-time {
+            color: #64748b;
+            margin-right: 0.75rem;
+            font-size: 0.75rem;
+        }
+
+        .log-type {
+            font-weight: 700;
+            margin-right: 0.75rem;
+            text-transform: uppercase;
+            font-size: 0.7rem;
+        }
+
+        .type-thinking { color: var(--status-thinking); border-color: var(--status-thinking); }
+        .type-tool { color: #818cf8; border-color: #818cf8; }
+        .type-success { color: #34d399; border-color: #34d399; }
+        .type-system { color: #f8fafc; border-color: #f8fafc; }
+
+        @keyframes slideIn {
+            from { transform: translateX(-10px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">CREW-GO ENGINE</div>
+        <div class="status-badge">
+            <div id="status-dot" class="status-dot"></div>
+            <span id="status-text">DISCONNECTED</span>
+        </div>
+    </header>
+
+    <main>
+        <div class="sidebar">
+            <div class="glass-card">
+                <div class="card-title">Active Agents</div>
+                <div id="agent-list" class="agent-list">
+                    <!-- Agents will be injected here -->
+                </div>
+            </div>
+            <div class="glass-card" style="flex: 1;">
+                <div class="card-title">System Metrics</div>
+                <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 2;">
+                    Memory Usage: <span style="color: white">124MB</span><br>
+                    CPU Load: <span style="color: white">2.4%</span><br>
+                    Active Threads: <span style="color: white">16</span><br>
+                    Event Throughput: <span style="color: white">48 e/s</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="terminal-container">
+            <div class="terminal-header">
+                <div class="terminal-dot" style="background: #ef4444;"></div>
+                <div class="terminal-dot" style="background: #eab308;"></div>
+                <div class="terminal-dot" style="background: #22c55e;"></div>
+                <span style="font-size: 0.7rem; color: #64748b; margin-left: 1rem; font-family: 'Inter';">LIVE EXECUTION TRACE</span>
+            </div>
+            <div id="terminal" class="terminal-content">
+                <div class="log-entry type-system">
+                    <span class="log-time">Initializing...</span>
+                    <span class="log-type">[SYS]</span>
+                    Waiting for WebSocket connection to Crew-GO backend...
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

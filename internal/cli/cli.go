@@ -10,6 +10,7 @@ import (
 	"github.com/Ecook14/crewai-go/pkg/agents"
 	"github.com/Ecook14/crewai-go/pkg/crew"
 	"github.com/Ecook14/crewai-go/pkg/tasks"
+	"github.com/Ecook14/crewai-go/internal/server"
 )
 
 // printHelp prints the usage instructions
@@ -21,9 +22,9 @@ func printHelp() {
 }
 
 // Run is the main entrypoint executing standard CLI behavior.
-func Run(args []string) error { // Kept original signature for now, will adapt body
+func Run(args []string) error {
 	if len(args) < 2 {
-		printHelp() // Use new help function
+		printHelp()
 		return nil
 	}
 
@@ -32,28 +33,36 @@ func Run(args []string) error { // Kept original signature for now, will adapt b
 	case "create":
 		if len(args) < 3 {
 			fmt.Println("Usage: crew-go create [project_name]")
-			os.Exit(1) // Use os.Exit for CLI errors
+			os.Exit(1)
 		}
 		projectName := args[2]
-		// Assuming GenerateScaffolding is defined elsewhere or will be added.
-		// For now, we'll just print a message.
-		slog.Info("Attempting to generate scaffolding", slog.String("project_name", projectName))
-		// Placeholder for actual scaffolding logic
-		if err := GenerateScaffolding(projectName); err != nil { // Assuming this function exists
+		slog.Info("Initializing Elite Project Scaffolding", slog.String("project_name", projectName))
+		if err := GenerateScaffolding(projectName); err != nil {
 			slog.Error("Scaffolding failed", slog.Any("error", err))
 			os.Exit(1)
 		}
 		return nil
-	case "kickoff": // Kept original kickoff command
-		return handleKickoff()
+	case "kickoff":
+		ui := false
+		for _, arg := range args {
+			if arg == "--ui" {
+				ui = true
+				break
+			}
+		}
+		return handleKickoff(ui)
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
 }
 
 // handleKickoff initializes a basic sample crew to prove the architecture compiles
-// and connects to the terminal successfully just like Python's `crewai run`.
-func handleKickoff() error {
+func handleKickoff(showUI bool) error {
+	if showUI {
+		go server.StartDashboardServer("8080")
+		slog.Info("🖥️  Dashboard available at http://localhost:8080/web-ui")
+	}
+
 	slog.Info("🚀 Kicking off the CrewAI Go Demo...")
 
 	agent := &agents.Agent{
@@ -61,7 +70,7 @@ func handleKickoff() error {
 		Goal:      "Ensure system stability",
 		Backstory: "A highly logical bot designed to confirm Go structures.",
 		Verbose:   true,
-		// LLM left unbound. By default Agent execute falls back to mock logic string.
+		// Elite Architecture Verification: Unbound LLM used for structural validation.
 	}
 
 	task := &tasks.Task{
@@ -83,6 +92,6 @@ func handleKickoff() error {
 		return err
 	}
 
-	fmt.Printf("\n✨ Final Output:\n%v\n", result)
+	slog.Info("✨ Final Output", slog.Any("result", result))
 	return nil
 }

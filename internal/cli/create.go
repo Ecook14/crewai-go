@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -32,6 +33,11 @@ func GenerateScaffolding(projectName string) error {
   goal: "Architect scalable Go solutions based on requirements."
   backstory: "You are a senior engineer who favors interfaces and clean architecture."
   verbose: true
+  sandbox: "docker"
+  tools:
+    - name: "BrowserTool"
+      params:
+        timeout: 60
 `
 	if err := os.WriteFile(filepath.Join(baseDir, "config", "agents.yaml"), []byte(agentsYaml), 0644); err != nil {
 		return err
@@ -61,27 +67,29 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/Ecook14/crewai-go/pkg/agents"
 	"github.com/Ecook14/crewai-go/pkg/config"
 	"github.com/Ecook14/crewai-go/pkg/crew"
 	"github.com/Ecook14/crewai-go/pkg/llm"
+	"github.com/Ecook14/crewai-go/pkg/tasks"
 )
 
 func main() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 
 	// 1. Load Configurations
-	agents, err := config.LoadAgents("config/agents.yaml")
+	agentsMap, err := config.LoadAgents("config/agents.yaml")
 	if err != nil {
 		panic(err)
 	}
 
-	tasksMap, err := config.LoadTasks("config/tasks.yaml", agents)
+	tasksMap, err := config.LoadTasks("config/tasks.yaml", agentsMap)
 	if err != nil {
 		panic(err)
 	}
 
 	// 2. Bind LLM
-	for _, a := range agents {
+	for _, a := range agentsMap {
 		a.LLM = llm.NewOpenAIClient(apiKey)
 	}
 
@@ -92,7 +100,7 @@ func main() {
 	}
 
 	var agentList []*agents.Agent
-	for _, a := range agents {
+	for _, a := range agentsMap {
 		agentList = append(agentList, a)
 	}
 
@@ -104,7 +112,11 @@ func main() {
 	}
 
 	slog.Info("Starting Boilerplate Crew...")
-	res, _ := myCrew.Kickoff(context.Background())
+	res, err := myCrew.Kickoff(context.Background())
+	if err != nil {
+		slog.Error("Crew execution failed", slog.Any("error", err))
+		os.Exit(1)
+	}
 	slog.Info("Finished!", slog.Any("result", res))
 }
 `
@@ -112,6 +124,21 @@ func main() {
 		return err
 	}
 
-	slog.Info("✅ Project successfully scaffolded!", slog.String("path", baseDir))
+	// 5. Elite Hardening: Automatic module initialization
+	slog.Info("Running 'go mod init'...", slog.String("project", projectName))
+	initCmd := exec.Command("go", "mod", "init", projectName)
+	initCmd.Dir = baseDir
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to run go mod init: %v (output: %s)", err, string(out))
+	}
+
+	slog.Info("Running 'go mod tidy' to fetch dependencies...")
+	tidyCmd := exec.Command("go", "mod", "tidy")
+	tidyCmd.Dir = baseDir
+	if out, err := tidyCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to run go mod tidy: %v (output: %s)", err, string(out))
+	}
+
+	slog.Info("✅ Project successfully scaffolded and hardened!", slog.String("path", baseDir))
 	return nil
 }

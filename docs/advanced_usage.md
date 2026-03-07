@@ -1,127 +1,161 @@
-# Crew-GO Advanced Usage 🔥
+# Crew-GO Advanced Orchestration 🔥
 
-While the Quickstart covers the basics, `Crew-GO` is built specifically to take advantage of Go's unique features compared to Python: specifically **Concurrency** and **Struct Typed Outputs**.
+This guide covers the most technically complex, industrial-grade features of the Crew-GO engine: Parallelism, Cyclic Graphs, Structured Outputs, and Flow State Machines.
 
-## 1. Structured JSON Output Extraction (Pydantic Equivalent)
-In Python's CrewAI, you use `Pydantic BaseModels` to force the LLM to output specific schemas. In `Crew-GO`, this is elegantly handled using native Go structs mapped to `json` tags.
+---
 
-### Defining Your Schema
-Define a Go struct for the data you want back:
+## 1. Top-Level Process Orchestration Modes
 
+When you create a `Crew`, the `Process` enum dictates exactly how the graph of tasks is resolved.
+
+### A. Sequential (`crew.Sequential`)
+Tasks execute strictly in the order they define in the slice.
+- **Use Case**: Simple data pipelines. `Scrape -> Summarize -> Save`.
+
+### B. Hierarchical (`crew.Hierarchical`)
+Task definitions execute **in parallel**, but they are not executed blindly.
+1. The Crew spins up an invisible autonomous `ManagerAgent`.
+2. The Manager looks at the parallel tasks and dynamically assigns them to the worker Agents in your slice.
+3. Once all parallel go-routines finish, the Manager synthesizes all results into a single final master output.
+- **Use Case**: Running massive, concurrent research sweeps (e.g. Scrape 10 websites at once) and merging the results.
+
+### C. Consensual (`crew.Consensual`)
+Takes a single task and launches it across **every Agent** concurrently. The ManagerAgent then forces consensus.
+- **Use Case**: Evaluating high-risk decisions where you want 5 different LLM personas to vote on the best answer.
+
+### D. Reflective (`crew.Reflective`)
+Sequential execution, but after every single task, the ManagerAgent executes a rigorous `ReviewPrompt`. If it rejects the output, the worker agent must retry from scratch.
+
+---
+
+## 2. Cyclic Graphs & State Machines (Elite)
+
+Standard frameworks use direct A -> B -> C flows. Crew-GO supports **DAGs with Cycles**. This means agents can get stuck in autonomous feedback loops until an exact condition is met.
+
+### Enabling Graph Mode
 ```go
-type ReviewSchema struct {
-	Score  int      `json:"score"`
-	Pros   []string `json:"pros"`
-	Cons   []string `json:"cons"`
-}
-```
-
-### Binding to Tasks
-Pass a pointer of your schema struct into `Task.OutputPydan`. When the task completes, `Crew-GO` instructs the LLM network to respond purely in JSON format and natively unmarshals it into your memory pointer!
-
-```go
-validationStruct := &ReviewSchema{}
-
-reviewTask := &tasks.Task{
-    Description: "Review the provided code and provide a score, pros, and cons.",
-    Agent:       reviewerAgent,
-    OutputPydan: validationStruct, // << Force schema here
-}
-
-// ... Run your crew Kickoff()
-
-// The result natively translates!
-fmt.Printf("Final Score is: %d\n", validationStruct.Score)
-```
-
-## 2. Parallel Concurency (Hierarchical Mode / Async Tasks)
-
-One of Go's massive benefits is lightweight Goroutines. `Crew-GO` leverages `sync.WaitGroup` to easily execute massive amounts of parallel tasks natively without the headaches of Python's `asyncio` loop.
-
-### Parallel Process Engine
-If you set the Crew Process to `crew.Hierarchical`, the engine will blast all mapped tasks out in parallel using WaitGroup worker pools.
-
-```go
-techCrew := crew.Crew{
-    Agents:  []*agents.Agent{agentA, agentB, agentC},
-    Tasks:   []*tasks.Task{task1, task2, task3},
-    Process: crew.Hierarchical, // << All tasks launch in parallel!
-}
-
-// Kickoff returns an `[]interface{}` slice when in Hierarchical Mode
-results, _ := techCrew.Kickoff(context.Background())
-```
-
-### Async Task Overrides
-Even inside a `crew.Sequential` execution block, you can designate specific tasks to immediately return and detach into the background using `AsyncExecution: true`.
-
-```go
-backgroundTask := &tasks.Task{
-    Description:    "Scrape massive amounts of web pages for an hour.",
-    Agent:          scraperAgent,
-    AsyncExecution: true, // Does not block the sequential pipeline!
-}
-```
-
-## 3. Context Timeout Propagation
-
-Because `Crew-GO` agents and crews take a native `context.Context` payload, you can prevent LLM hangs easily out-of-the-box. Both Tasks and the Crew Orchestrators constantly listen for `<-ctx.Done()`.
-
-```go
-```go
-// Allow the crew 5 minutes MAXIMUM to finish all tasks
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-defer cancel()
-
-result, err := techCrew.Kickoff(ctx)
-if err == context.Canceled {
-    fmt.Println("Crew took too long! Aborting cleanly.")
-}
-```
-
-## 4. YAML Configuration Loaders (`pkg/config`)
-
-Instead of writing verbose Go structs, non-engineers can define Prompts natively in YAML exactly like the Python equivalent.
-
-**config/agents.yaml**:
-```yaml
-designer:
-  role: "Lead Software Designer"
-  goal: "Architect scalable Go solutions based on requirements."
-  backstory: "You are a senior engineer who favors interfaces."
-```
-
-**main.go**:
-```go
-agentsMap, err := config.LoadAgents("config/agents.yaml")
-tasksMap, err := config.LoadTasks("config/tasks.yaml", agentsMap)
-
 myCrew := crew.Crew{
-    Agents: []*agents.Agent{agentsMap["designer"]},
-    Tasks:  []*tasks.Task{tasksMap["design_task"]},
+    Agents:  agents,
+    Tasks:   tasks,
+    Process: crew.Graph, // Enable DAG Mode
+    MaxCycles: 50,       // Global infinite-loop protection
 }
 ```
 
-## 5. Event-Driven Flow State Machines (`pkg/flow`)
-
-To connect multiple standalone `Crews` together using reactive state-machines, use the built in Go-Channel Router.
+### Defining Cycles via `OutputCondition`
+You bind a function to a Task that analyzes its output. Depending on the return string, the task routes to a new path.
 
 ```go
-f := flow.NewFlow(nil)
+codeTask := &tasks.Task{
+    Description: "Write a sorting algorithm in Go.",
+    Agent:       coder,
+}
 
-// Build a pipeline of multiple Crews
-f.AddNode(func(ctx context.Context, state flow.State) (flow.State, error) {
-    // Run Crew A...
-    state["research_done"] = true
-    return state, nil
-})
+testTask := &tasks.Task{
+    Description: "Test the provided code. If it fails, output 'FAIL'. If it passes, output 'PASS'.",
+    Agent:       qaAgent,
+    Dependencies: []*tasks.Task{codeTask}, // testTask waits for codeTask
+}
 
-f.AddNode(func(ctx context.Context, state flow.State) (flow.State, error) {
-    if state["research_done"] == true {
-        // Run Crew B!
+// Map the outcomes
+testTask.NextPaths = map[string]*tasks.Task{
+    "retry":   codeTask, // Cycle backwards!
+    "success": deployTask, // Move forwards
+}
+
+// Evaluate the specific outcome
+testTask.OutputCondition = func(result interface{}) string {
+    resStr := fmt.Sprintf("%v", result)
+    if strings.Contains(resStr, "FAIL") {
+        return "retry"
     }
-    return state, nil
-})
+    return "success"
+}
+```
+If `testTask` fails, the Engine natively rewinds the state, marks `codeTask` as incomplete, and kicks off the execution loop again.
 
-finalState, _ := f.Kickoff(context.Background())
+---
+
+## 3. Structural JSON Output Extraction
+
+CrewAI in Python utilizes `Pydantic` heavily to coerce LLMs into outputting JSON schemas. Crew-GO achieves this entirely natively using Go compilation structs.
+
+### How it works
+You pass a pointer of a Go Struct to a `Task`. Crew-GO dynamically reads the `json` tags via reflection, builds a JSON-Schema definition, injects it into the LLM system prompt, forces `JSON Mode` on the OpenAI protocol, and unmarshals the response back into your pointer.
+
+```go
+// 1. Define your Strict Schema
+type FinancialReport struct {
+    CompanyTicker string   `json:"company_ticker"`
+    BullPoints    []string `json:"bull_points"`
+    BearPoints    []string `json:"bear_points"`
+    RiskScore     int      `json:"risk_score_1_to_10"`
+}
+
+var finalReport FinancialReport
+
+// 2. Bind the pointer to the Task
+analystTask := &tasks.Task{
+    Description:  "Analyze AAPL's latest Q3 earnings.",
+    Agent:        analyst,
+    OutputSchema: &finalReport, // MAGIC HAPPENS HERE
+}
+
+myCrew.Kickoff(ctx)
+
+// 3. Immediately use Native Go Structs!
+fmt.Printf("Risk Score: %d\n", finalReport.RiskScore)
+for _, point := range finalReport.BullPoints {
+    fmt.Println("+", point)
+}
+```
+
+---
+
+## 4. Multi-Crew Orchestration (`pkg/flow`)
+
+If `crew.Crew` is a microservice, `flow.Flow` is the Kubernetes that connects them all together. Flows are reactive State Machines that pipe shared state dictionaries `map[string]interface{}` between distinct functional Nodes.
+
+### Creating a Flow
+```go
+import "github.com/Ecook14/crewai-go/pkg/flow"
+
+// Initial State Dictionary
+initialState := flow.State{"company": "OpenAI"}
+f := flow.NewFlow(initialState)
+```
+
+### Adding Parallel Nodes
+Run multiple independent AI crews or Go functions concurrently, modifying the shared state.
+```go
+f.AddParallelNodes([]flow.Node{
+    fetchFinancialsNode,
+    fetchNewsNode,
+    fetchSocialSentimentNode,
+})
+```
+
+### Adding Conditional Branhes (Routers)
+Evaluate the state and completely branch your application execution.
+```go
+f.AddRouter(&flow.RouterNode{
+    Routes: []flow.Route{
+        {
+            Name: "buy-stock",
+            Pred: func(s flow.State) bool { return s["sentiment"] == "very_bullish" },
+            Node: executeTradeCrew, // Kickoff a trading Crew
+        },
+        {
+            Name: "hold-position",
+            Pred: func(s flow.State) bool { return s["sentiment"] == "neutral" },
+            Node: logAlertCrew, // Kickoff an alerting Crew
+        },
+    },
+    DefaultNode: fallbackNode,
+})
+```
+
+```go
+// Kickoff the entire Flow infrastructure
+finalMasterState, err := f.Kickoff(context.Background())
 ```

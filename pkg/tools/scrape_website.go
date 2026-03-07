@@ -30,13 +30,15 @@ func (t *ScrapeWebsiteTool) Execute(ctx context.Context, input map[string]interf
 	if !ok {
 		return "", fmt.Errorf("missing 'url' in input")
 	}
-
 	urlStr, ok := urlRaw.(string)
 	if !ok {
 		return "", fmt.Errorf("'url' must be a string")
 	}
 
-	// Simple HTTP GET request mapping
+	if t.Options != nil && t.Options["verbose"] == true {
+		slog.Info("Tool [Scrape Website]: Scraping URL", slog.String("url", urlStr))
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
@@ -58,13 +60,12 @@ func (t *ScrapeWebsiteTool) Execute(ctx context.Context, input map[string]interf
 		return "", fmt.Errorf("failed to read body: %w", err)
 	}
 
-	// Just return raw body text (simulating basic scraping string extraction)
 	body := string(bodyBytes)
-	
-	// Optional trim to prevent massive context dumps
 	if len(body) > 10000 {
 		body = body[:10000] + "\n... [Output Truncated]"
 	}
 
 	return strings.TrimSpace(body), nil
 }
+
+func (t *ScrapeWebsiteTool) RequiresReview() bool { return false }
